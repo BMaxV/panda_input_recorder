@@ -2,10 +2,17 @@ import time
 
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import KeyboardButton
+from panda3d.core import LVector3
 from direct.gui.DirectFrame import DirectFrame
+from direct.gui.DirectButton import DirectButton
+from direct.gui import DirectGuiGlobals as DGG
+from direct.showbase import DirectObject
 
-from panda_interface_glue import panda_interface_glue as pig
-from my_save import sxml_main
+#from panda_interface_glue import panda_interface_glue as pig
+#from my_save import sxml_main
+
+# J. Blow explains "Braid"
+# https://www.youtube.com/watch?v=HbgQjNVlxis
 
 class InputRecord:
     def __init__(self):
@@ -18,43 +25,57 @@ class InputRecord:
         self.current_playback_counter = 0
         self.current_playback_time = None
         self.engine_playback_time = None
+        
+        self.play_from_inputs = False
+        
+        self.rewinding = False
+        self.rewind_record = []
 
         self.engine_too_fast_delta_t = 0
 
         self.record_inputs = True
         self.record_data = True
-
-    def record(self, inputs, sim_data, delta_t):
+        
+        
+        ## I think I can't do this in one place?
+        #self.current_tick_recording = []
+        
+    def record(self, delta_t, inputs, sim_data):
+        """
+        very naive approach, just shove it into a list.
+        """
         
         if inputs == []:
             inputs = [1]
+        
+        
         self.current_record.append([delta_t, inputs, sim_data])
 
-    def save(self, fn="recordtest.xml"):
-        my_data = {"data": self.current_record}
-        sxml_main.write(fn, my_data)
+    #def save(self, fn="recordtest.xml"):
+        #my_data = {"data": self.current_record}
+        #sxml_main.write(fn, my_data)
 
-    def load(self, fn="recordtest.xml"):
-        self.current_record = sxml_main.read(fn)["data"]
+    #def load(self, fn="recordtest.xml"):
+        #self.current_record = sxml_main.read(fn)["data"]
 
     def start_recording(self, *args):
         self.recording = True
 
     def stop_recording(self, *args):
         self.recording = False
-        self.save()
+        #self.save()
 
     def start_playback(self, *args):
         self.playing = True
         self.current_playback_counter = 0
         self.current_playback_time = 0
         self.engine_playback_time = 0
-        self.load()
+        #self.load()
 
     def toggle_pause_playback(self, *args):
         self.playing = not self.playing
 
-    def get_play_inputs(self, engine_delta_t):
+    def get_play_inputs(self, engine_delta_t, rewind = False):
         """
         this is multiple timeline wibbly wobbly confusing stuff. so bear with me.
 
@@ -154,7 +175,12 @@ class InputRecord:
 
             if self.current_playback_time < self.engine_playback_time:
                 self.engine_playback_time = self.current_playback_time
-
+        elif rewind:
+            # during rewind, I can't use inputs,  because those would be processed forward in time.
+            # I have to use data.
+            # and I'm stepping backwards from the last point when the input was pressed,
+            # and "reducing" game time.
+            delta_t, inputs, game_data = 0, [],{}
         else:
             self.engine_too_fast_delta_t += engine_delta_t
             delta_t, inputs, game_data = 0, [], {}
@@ -163,31 +189,29 @@ class InputRecord:
 
 
 class Wrapper:
-
     def __init__(self):
         self.b = ShowBase()
         self.input_record = InputRecord()
 
-        pig.create_button("start recording", (0.8, 0, 0), 0.05,
+        create_button("start recording", (0.8, 0, 0), 0.05,
                           self.input_record.start_recording, tuple())
-        pig.create_button("stop recording", (0.8, 0, -0.1),
+        create_button("stop recording", (0.8, 0, -0.1),
                           0.05, self.input_record.stop_recording, tuple())
-
-        pig.create_button("start playback", (0.8, 0, -0.2),
+        create_button("start playback", (0.8, 0, -0.2),
                           0.05, self.start_playback_wrap, tuple())
-        pig.create_button("toggle pause playback", (0.8, 0, -0.3),
+        create_button("toggle pause playback", (0.8, 0, -0.3),
                           0.05, self.input_record.toggle_pause_playback, tuple())
-
-        pig.create_button("set playback to data", (0.8, 0, -0.4),
+        create_button("set playback to data", (0.8, 0, -0.4),
                           0.05, self.set_playback_to_data, tuple())
-
-        pig.create_button("set playback to inputs", (0.8, 0, -0.5),
+        create_button("set playback to inputs", (0.8, 0, -0.5),
                           0.05, self.set_playback_to_inputs, tuple())
 
         self.output = []
-
+        self.special=[]
         self.b.taskMgr.add(move_task, "Move Task",
                            extraArgs=[self], appendTask=True)
+        
+        self.event_handler = DirectObject.DirectObject()
         self.bind()
 
         frameSize = (-0.1, 0.1, -0.1, 0.1)
@@ -195,25 +219,51 @@ class Wrapper:
         self.frame = DirectFrame(pos=(0, 0, 0), frameSize=frameSize)
         self.move_speed = 1
 
+        # since rewinding with data doesn't work with 
+        # inputs, have to default to False here.
+        
         self.process_inputs = True
-
+        
+        #self.rewind_markers = []
+        
+        
     def start_playback_wrap(self, *args):
         # this is for resetting in case I play back inputs
         self.frame.setPos(*(0, 0, 0))
-        print(f"processing recorded inputs{self.process_inputs}")
         self.input_record.start_playback()
 
     def set_playback_to_inputs(self, *args):
-        self.process_inputs = True
-        print(f"processing recorded inputs{self.process_inputs}")
+        self.input_record.play_from_inputs = True
+        print(f"processing recorded inputs{self.input_record.play_from_inputs}")
 
     def set_playback_to_data(self, *args):
-        self.process_inputs = False
-        print(f"processing recorded inputs{self.process_inputs}")
+        self.input_record.play_from_inputs = False
+        print(f"processing recorded inputs{self.input_record.play_from_inputs}")
 
-    def main(self, delta_t, inputs, apply_data):
-
-        if self.process_inputs:
+    def main(self, delta_t):
+        #inputs, apply_data
+        apply_data = {}
+        
+        if self.input_record.playing:
+            delta_t, inputs, apply_data = self.input_record.get_play_inputs(delta_t)
+            if self.input_record.play_from_inputs:
+                apply_data = {}
+            else:
+                inputs = []
+            print(inputs,apply_data,self.process_inputs)
+        elif self.input_record.rewinding:
+            if len(self.input_record.rewind_record) == 1:
+                self.input_record.rewinding = False
+                
+            delta_t, inputs, apply_data, rewind_marker = self.input_record.rewind_record.pop(-1)
+            
+            inputs = []
+            rewind_marker.destroy()
+            
+        else:
+            delta_t, inputs, apply_data = delta_t, self.output, {}
+        
+        if self.process_inputs and not self.input_record.rewinding and not self.input_record.playing:
             org_pos = list(self.frame.getPos())
             if "forward" in inputs:
                 org_pos[2] += self.move_speed * delta_t
@@ -227,15 +277,44 @@ class Wrapper:
             if "left" in inputs:
                 org_pos[0] += -self.move_speed * delta_t
             apply_data = {"framePos": org_pos}
-
+        
+        if self.process_inputs:
+            if "start rewind" in inputs:
+                self.input_record.rewinding = True
+                
+            if "end rewind" in inputs:
+                self.input_record.rewinding = False
+        
+        self.special = []
+        
         # either my inputs are live and I apply them and I have data
         # or they are recorded, I apply them and I have data
         # or I just have data
 
         if "framePos" in apply_data:
+            
             self.frame.setPos(*apply_data["framePos"])
 
         my_data = {"framePos": list(self.frame.getPos())}
+        
+        if self.input_record.recording:
+            self.input_record.record(delta_t, self.output, my_data)
+            
+        if self.input_record.rewinding == False:
+            frameSize = (-0.1, 0.1, -0.1, 0.1)
+            rewind_marker = DirectFrame(pos=(0, 0, 0), frameSize=frameSize)
+            rewind_marker.setColor(0,1,0)
+            rewind_marker.setScale(0.1)
+            rewind_marker.setPos(self.frame.getPos())
+            self.input_record.rewind_record.append([delta_t,self.output,my_data,rewind_marker])
+                
+        
+        while len(self.input_record.rewind_record)>100:
+            stuff = self.input_record.rewind_record.pop(0)
+            stuff[-1].removeNode()
+        
+        self.output = []
+        
         return my_data
 
     def bind(self):
@@ -246,14 +325,24 @@ class Wrapper:
             "s": "back",
             "d": "right",
         }
-
-        hold_key_actions = ["forward", "back", "left", "right"]
+        my_map = base.win.get_keyboard_map()
+        
+        hold_key_actions = ["forward", "back", "left", "right", ]
         for key in key_action_dict:
             if key_action_dict[key] in hold_key_actions:
                 nkey = key.encode()
+                finalkey = KeyboardButton.ascii_key(nkey)
                 self.buttons_move_actions.update(
-                    {KeyboardButton.ascii_key(nkey): key_action_dict[key]})
-
+                    {finalkey: key_action_dict[key]})
+        #self.buttons_move_actions["space"] = "rewind"
+        #self.buttons_move_actions["lshift"] = "something"
+        
+        self.event_handler.accept("space",self.pass_on,["start rewind"])
+        #self.event_handler.accept("space_down",self.pass_on,["start rewind"])
+        self.event_handler.accept("space-up",self.pass_on,["end rewind"])
+        self.event_handler.accept("space_up",self.pass_on,["end rewind"])
+        
+        
     def pass_on(self, my_input, *args):
         self.output.append(my_input)
 
@@ -273,22 +362,35 @@ def move_task(*args):
     return Task.cont
 
 
+def create_button(text,position,scale,function, arguments,text_may_change=0,frame_size=(-4.5,4.5,-0.75,0.75)):
+    
+    position=LVector3(*position)
+    button = DirectButton(text=text,
+                    pos=position,
+                    scale=scale,
+                    frameSize=frame_size,
+                    textMayChange=text_may_change)#(.9, 0, .75), text="Open"))
+                                   #scale=.1, pad=(.2, .2),
+                                   #rolloverSound=None, clickSound=None,
+                                   #command=self.toggleusicBox)
+    #position[0]+=0.1
+    
+    button.setPos(*position)
+    
+    if function!=None and arguments!=None:
+        arguments=list(arguments)
+        button.bind(DGG.B1PRESS,function,arguments)
+        
+    return button
+
+
 def main():
     W = Wrapper()
     while True:
         delta_t = globalClock.dt
         W.b.taskMgr.step()
-        apply_data = {}
-
-        if W.input_record.playing:
-            W.main(*W.input_record.get_play_inputs(delta_t))
-        else:
-            apply_data = W.main(delta_t, W.output, {})
-
-        if W.input_record.recording:
-            W.input_record.record(W.output, apply_data, delta_t)
-
-        W.output = []
+        W.main(delta_t)
+        
 
 
 if __name__ == "__main__":
