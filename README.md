@@ -14,6 +14,12 @@ There are 6 buttons:
 It uses my xml save file format, which is not ideal, but it works.
 It also uses my interface button creation thing, which is not needed. You can also just use directButtons or whatever else you want to trigger the behavior, like hotkeys etc..
 
+# Mechanically Challenged
+
+This project was submitted to "mechanically challenged" https://mechanicallychallenged.org/
+
+The written explanation for how things work is overe here: Mechanically_Challenged.md
+
 ## important-ish timey whimye wibbly wobbly nonsense
 
 Probably really worth considering if you want to have a "playback" feature in your game, think about this (also as a docstring in my "get_play_inputs" function:
