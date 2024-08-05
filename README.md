@@ -18,7 +18,9 @@ It also uses my interface button creation thing, which is not needed. You can al
 
 This project was submitted to "mechanically challenged" https://mechanicallychallenged.org/
 
-The written explanation for how things work is overe here: Mechanically_Challenged.md
+The written explanation for how things work is [over here](Mechanically_Challenged.md).
+
+There is a playable demo [on itch.io](https://bmaxv.itch.io/mechanically-challenged-time-rewind)
 
 ## important-ish timey whimye wibbly wobbly nonsense
 
